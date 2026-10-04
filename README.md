@@ -1,6 +1,6 @@
 # Nextflow WES Variant Calling Pipeline
 
-A reproducible **Whole Exome Sequencing (WES) variant-calling pipeline** developed using **Nextflow DSL2**. The workflow processes paired-end FASTQ files through quality control, read alignment, duplicate marking, alignment metrics, germline variant calling, and variant filtration.
+A reproducible **Whole Exome Sequencing (WES) variant-calling pipeline** developed using **Nextflow DSL2**. The workflow processes paired-end FASTQ files through quality control, read alignment, duplicate marking, alignment and insert-size metrics, germline variant calling, variant selection, and variant filtration.
 
 The pipeline was developed and tested in a **Linux/WSL environment using Miniconda**.
 
@@ -17,33 +17,37 @@ The pipeline was developed and tested in a **Linux/WSL environment using Minicon
 - [Project Structure](#project-structure)
 - [Requirements](#requirements)
 - [Installation](#installation)
-- [Input Requirements](#input-requirements)
+- [Input Data and Configuration](#input-data-and-configuration)
 - [Running the Pipeline](#running-the-pipeline)
 - [Pipeline Steps](#pipeline-steps)
+- [Results and Outputs](#results-and-outputs)
+- [Intermediate File Management](#intermediate-file-management)
 - [Important Notes](#important-notes)
 - [Reproducibility](#reproducibility)
+
 
 ---
 
 ## Project Overview
 
-This project implements a modular WES analysis workflow using **Nextflow DSL2**.
+This project implements a modular **WES analysis workflow using Nextflow DSL2**.
 
-The pipeline is designed to process paired-end WES sequencing data and perform:
+The pipeline starts with paired-end FASTQ files and performs the following major analysis steps:
 
-- Raw-read quality control
-- QC report aggregation
-- Reference genome alignment
+- Raw-read quality control using FastQC
+- QC report aggregation using MultiQC
+- Read alignment using BWA-MEM
+- BAM processing
 - Duplicate marking
-- BAM sorting and processing
-- Alignment metrics
-- Insert-size metrics
-- Germline variant calling
+- Alignment metrics generation
+- Insert-size metrics generation
+- Germline variant calling using GATK HaplotypeCaller
 - Variant selection
 - Variant filtration
 - PASS variant selection
+- Final filtered VCF generation
 
-The workflow is organized into independent Nextflow modules to make the pipeline easier to maintain, test, and reuse.
+The workflow is organized into independent Nextflow modules, allowing individual analysis processes to be maintained and executed separately.
 
 ---
 
@@ -52,42 +56,42 @@ The workflow is organized into independent Nextflow modules to make the pipeline
 The overall workflow is:
 
 ```text
-                 Paired-end FASTQ
-                        │
-                        ▼
-                     FastQC
-                        │
-                        ▼
-                     MultiQC
-                        │
-                        ▼
-                    BWA-MEM
-                        │
-                        ▼
-                 BAM Processing
-                        │
-                        ▼
-                Mark Duplicates
-                        │
-              ┌─────────┴─────────┐
-              ▼                   ▼
-      Alignment Metrics     Insert Size Metrics
-              │                   │
-              └─────────┬─────────┘
-                        ▼
-               GATK HaplotypeCaller
-                        │
-                        ▼
-                 Variant Selection
-                        │
-                        ▼
-                Variant Filtration
-                        │
-                        ▼
-                  PASS Selection
-                        │
-                        ▼
-                 Final VCF Output
+                  Paired-end FASTQ
+                         │
+                         ▼
+                      FastQC
+                         │
+                         ▼
+                      MultiQC
+                         │
+                         ▼
+                     BWA-MEM
+                         │
+                         ▼
+                  BAM Processing
+                         │
+                         ▼
+                 Mark Duplicates
+                         │
+              ┌──────────┴──────────┐
+              ▼                     ▼
+      Alignment Metrics       Insert Size Metrics
+              │                     │
+              └──────────┬──────────┘
+                         ▼
+                GATK HaplotypeCaller
+                         │
+                         ▼
+                  Variant Selection
+                         │
+                         ▼
+                 Variant Filtration
+                         │
+                         ▼
+                   PASS Selection
+                         │
+                         ▼
+                  Final Filtered VCF
 ```
 
 ---
@@ -128,7 +132,7 @@ The **GRCh38/hg38 reference genome** was downloaded from the UCSC Genome Browser
 
 [UCSC hg38 Reference Genome](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz?utm_source=chatgpt.com)
 
-The reference genome was subsequently indexed and prepared for use with BWA, SAMtools, and GATK.
+The reference genome was subsequently prepared with the required BWA, SAMtools, and GATK index/dictionary files.
 
 ---
 
@@ -147,14 +151,6 @@ seqtk sample -s100 sample_R2.fastq.gz 10000 | gzip > test_R2.fastq.gz
 
 The resulting test FASTQ files were stored in the `data/` directory.
 
-Example:
-
-```text
-data/
-├── test_R1.fastq.gz
-└── test_R2.fastq.gz
-```
-
 ### Purpose of the Reduced Dataset
 
 The reduced dataset was used for:
@@ -163,25 +159,28 @@ The reduced dataset was used for:
 - Workflow testing
 - Process validation
 - Nextflow module integration
-- End-to-end pipeline execution
+- End-to-end workflow execution
 
 ### Important Limitation
 
-Because the test dataset contains only **10,000 reads**, the sequencing depth and coverage are substantially lower than those expected from the complete WES dataset.
+Because the test dataset contains only **10,000 reads per paired-end FASTQ file**, the sequencing depth and coverage are substantially lower than those expected from the complete WES dataset.
 
-Therefore:
+Therefore, the resulting:
 
-> The resulting coverage, depth, and variant counts should not be interpreted as representative of the complete HG001 WES dataset.
+- Coverage
+- Depth
+- Alignment statistics
+- Variant counts
 
-For production or research-grade analysis, the complete sequencing dataset should be processed using sufficient computational resources.
+should be interpreted as **pipeline validation results** and not as representative results from the complete HG001 WES dataset.
 
 ---
 
 ## Reference Genome Preparation
 
-The reference genome was prepared separately before running the workflow.
+The GRCh38/hg38 reference genome was prepared separately before running the workflow.
 
-The following files were generated and required for the pipeline:
+The following files are required in the `reference/` directory:
 
 ```text
 reference/
@@ -203,7 +202,7 @@ The reference genome was indexed using:
 bwa index hg38.fa
 ```
 
-This generated the BWA index files:
+This generates:
 
 ```text
 hg38.fa.amb
@@ -215,13 +214,13 @@ hg38.fa.sa
 
 ### SAMtools FASTA Index
 
-A FASTA index was generated using:
+The FASTA index was generated using:
 
 ```bash
 samtools faidx hg38.fa
 ```
 
-This generated:
+This generates:
 
 ```text
 hg38.fa.fai
@@ -229,13 +228,13 @@ hg38.fa.fai
 
 ### GATK Sequence Dictionary
 
-A GATK-compatible sequence dictionary was generated using:
+The GATK sequence dictionary was generated using:
 
 ```bash
 gatk CreateSequenceDictionary -R hg38.fa
 ```
 
-This generated:
+This generates:
 
 ```text
 hg38.dict
@@ -243,23 +242,21 @@ hg38.dict
 
 ### Why Reference Preparation Is Not Included in the Workflow
 
-Reference indexing is a one-time preparation step and can require considerable computational resources.
+Reference indexing is a one-time preparation step and can require significant computational resources.
 
-To reduce unnecessary processing time during pipeline execution, the reference genome and all required index files were prepared separately.
+To avoid repeating this preparation every time the pipeline is executed, the reference genome and all required index/dictionary files were prepared separately.
 
-The current Nextflow workflow therefore starts from an already-prepared reference genome and proceeds directly to the alignment stage.
-
-**Before running the pipeline, ensure that all required files are present in the `reference/` directory.**
+The current Nextflow workflow therefore expects an **already prepared reference genome** and begins with the alignment stage.
 
 ---
 
 ## Environment and Software Versions
 
-The pipeline was developed and tested in a **Miniconda environment** on Linux/WSL.
+The pipeline was developed and tested in a **Miniconda-managed Linux/WSL environment**.
 
 ### Conda Environment
 
-Create the environment:
+Create the dedicated environment:
 
 ```bash
 conda create -n nextflow-wes
@@ -271,20 +268,20 @@ Activate it:
 conda activate nextflow-wes
 ```
 
-Install the required software and dependencies listed below in this environment.
+Install the required software and dependencies listed below.
 
 ### Software Versions
 
-| Software | Version |
-|---|---|
-| Nextflow | 26.04.6 |
-| FastQC | 0.12.1 |
-| MultiQC | 1.35 |
-| BWA-MEM | 0.7.19 |
-| SAMtools | 1.21 |
-| GATK | 4.6.2.0 |
-| HTSJDK | 4.2.0 |
-| Picard | 3.4.0 |
+| Software | Version | Purpose |
+|---|---:|---|
+| Nextflow | 26.04.6 | Workflow orchestration |
+| FastQC | 0.12.1 | Raw-read quality control |
+| MultiQC | 1.35 | QC report aggregation |
+| BWA-MEM | 0.7.19 | Read alignment |
+| SAMtools | 1.21 | BAM/FASTA processing |
+| GATK | 4.6.2.0 | Variant calling and processing |
+| HTSJDK | 4.2.0 | GATK dependency |
+| Picard | 3.4.0 | BAM metrics and duplicate processing |
 
 ### Nextflow
 
@@ -296,25 +293,13 @@ created 09-07-2026 18:49 UTC
 
 The workflow is implemented using **Nextflow DSL2**.
 
-### GATK Components
-
-The variant-calling and variant-processing environment includes:
-
-```text
-GATK       4.6.2.0
-HTSJDK     4.2.0
-Picard     3.4.0
-```
-
-Documenting these versions helps maintain reproducibility across different environments.
-
 ---
 
 ## Project Structure
 
 ### Local Project Structure
 
-The complete project used to execute the workflow contains:
+The complete local environment used to execute the pipeline contains:
 
 ```text
 Nextflow-WES-Pipeline/
@@ -347,15 +332,27 @@ Nextflow-WES-Pipeline/
 │   ├── select_variants.nf
 │   └── variant_filtration.nf
 │
+├── results/
+│   ├── alignment_metrics/
+│   ├── bwa/
+│   ├── fastqc/
+│   ├── haplotypecaller/
+│   ├── insert_size_metrics/
+│   ├── markduplicates/
+│   ├── multiqc/
+│   ├── select_pass/
+│   ├── select_variants/
+│   └── variant_filtration/
+│
 ├── main.nf
 └── nextflow.config
 ```
 
-### GitHub Repository Structure
+### GitHub Repository
 
-Large input and reference files are **not included in this GitHub repository**.
+Large sequencing and reference files are not included in the repository.
 
-The repository contains the workflow implementation:
+The GitHub repository contains the pipeline implementation:
 
 ```text
 Nextflow-WES-Pipeline/
@@ -375,23 +372,25 @@ Nextflow-WES-Pipeline/
     └── variant_filtration.nf
 ```
 
-Users must prepare the required `data/`, `bed/`, and `reference/` directories locally before running the workflow.
+Example final outputs are maintained separately in the `finalvcf_metrics/` directory for demonstration purposes.
 
 ---
 
 ## Requirements
 
-Before running the pipeline, ensure that the following requirements are available:
+Before running the pipeline, ensure that the following are available:
 
-1. **Miniconda/Conda**
-2. **Nextflow**
-3. Required bioinformatics tools and dependencies
+1. Miniconda/Conda
+2. Nextflow
+3. Required bioinformatics tools
 4. Paired-end FASTQ files
 5. Compatible WES target BED file
 6. GRCh38/hg38 reference genome
 7. Required BWA indexes
 8. FASTA index (`.fai`)
 9. GATK sequence dictionary (`.dict`)
+
+The reference genome and target BED file must correspond to the same genome assembly.
 
 ---
 
@@ -413,35 +412,30 @@ Install the required software packages and dependencies listed in the [Software 
 
 ---
 
-### Step 2: Prepare the Required Directories
+### Step 2: Prepare the Required Files
 
-The following directories should be available locally:
+The local project should contain:
 
 ```text
 bed/
 data/
 reference/
 modules/
-```
-
-Along with:
-
-```text
 main.nf
 nextflow.config
 ```
 
 The `data/` directory should contain the paired-end FASTQ files.
 
-The `bed/` directory should contain the appropriate WES capture BED file.
+The `bed/` directory should contain the appropriate WES capture target BED file.
 
-The `reference/` directory should contain the prepared hg38 reference genome and all required index files.
+The `reference/` directory should contain the prepared hg38 reference genome and required indexes.
 
 ---
 
 ### Step 3: Verify the Reference Files
 
-Before execution, verify that the following files are present:
+Before running the pipeline, verify that the following files are available:
 
 ```text
 hg38.fa
@@ -456,12 +450,44 @@ hg38.fa.sa
 
 ---
 
+## Input Data and Configuration
+
+This implementation does not require a separate sample sheet.
+
+The pipeline uses the input paths and parameters defined in:
+
+```text
+nextflow.config
+```
+
+The workflow expects paired-end FASTQ files and the required reference genome and BED file to be available in the appropriate directories.
+
+The main workflow is defined in:
+
+```text
+main.nf
+```
+
+Individual pipeline processes are implemented as separate modules under:
+
+```text
+modules/
+```
+
+---
+
 ## Running the Pipeline
 
-From the project root directory, activate the Conda environment:
+Activate the Conda environment:
 
 ```bash
 conda activate nextflow-wes
+```
+
+Navigate to the project root:
+
+```bash
+cd Nextflow-WES-Pipeline
 ```
 
 Run the workflow:
@@ -470,11 +496,7 @@ Run the workflow:
 nextflow run main.nf
 ```
 
-The workflow uses the parameters and paths defined in:
-
-```text
-nextflow.config
-```
+The pipeline executes the processes defined in `main.nf` using the configuration specified in `nextflow.config`.
 
 ---
 
@@ -482,9 +504,9 @@ nextflow.config
 
 ### 1. FastQC
 
-FastQC is used to perform quality control on the input FASTQ files.
+FastQC is used to evaluate the quality of the input FASTQ files.
 
-The analysis evaluates common sequencing quality metrics such as:
+Quality metrics include:
 
 - Per-base sequence quality
 - Sequence length
@@ -496,41 +518,43 @@ The analysis evaluates common sequencing quality metrics such as:
 
 ### 2. MultiQC
 
-MultiQC aggregates the quality-control reports generated by FastQC into a consolidated report.
-
-This provides an overall view of the sequencing quality.
+MultiQC aggregates the FastQC results into a consolidated quality-control report.
 
 ---
 
 ### 3. Read Alignment
 
-Paired-end sequencing reads are aligned to the **GRCh38/hg38 reference genome** using BWA-MEM.
+Paired-end reads are aligned against the GRCh38/hg38 reference genome using **BWA-MEM**.
 
-The pre-generated BWA indexes are used during this step.
-
----
-
-### 4. Duplicate Marking and BAM Processing
-
-Aligned reads are processed and duplicate reads are identified and marked.
-
-BAM files are sorted and prepared for downstream variant calling.
+The pre-generated BWA indexes are used during alignment.
 
 ---
 
-### 5. Alignment Metrics
+### 4. BAM Processing
 
-Alignment metrics are generated to assess the quality and characteristics of the sequencing alignment.
-
----
-
-### 6. Insert-Size Metrics
-
-Insert-size metrics are generated to evaluate the distribution of fragment sizes in the sequencing data.
+The aligned reads are processed and sorted to generate BAM files suitable for downstream analysis.
 
 ---
 
-### 7. Germline Variant Calling
+### 5. Duplicate Marking
+
+Duplicate reads are identified and marked using the duplicate-marking process.
+
+---
+
+### 6. Alignment Metrics
+
+Alignment metrics are generated to evaluate the mapping characteristics of the sequencing data.
+
+---
+
+### 7. Insert-Size Metrics
+
+Insert-size metrics are generated to evaluate the fragment-size distribution of the sequencing library.
+
+---
+
+### 8. Germline Variant Calling
 
 Germline SNVs and indels are called using:
 
@@ -540,133 +564,211 @@ GATK HaplotypeCaller
 
 ---
 
-### 8. Variant Selection
+### 9. Variant Selection
 
-Variants are separated/selected according to the required variant categories for downstream processing.
-
----
-
-### 9. Variant Filtration
-
-Quality-based filtering is applied to the called variants.
-
-The filtering stage is used to identify variants that satisfy the configured quality criteria.
+Variants are selected into the required categories for downstream filtration.
 
 ---
 
-### 10. PASS Variant Selection
+### 10. Variant Filtration
 
-Variants that pass the configured filtering criteria are selected for the final analysis.
+Quality-based filtering is applied to the called variants according to the configured filtering criteria.
 
 ---
 
+### 11. PASS Variant Selection
 
-## Results and QC Outputs
+Variants that pass the configured filtering criteria are selected for the final analysis-ready VCF.
 
-Example analysis outputs generated during the pipeline execution are provided in the:
+---
+
+## Results and Outputs
+
+All pipeline-generated outputs are organized under the:
 
 ```text
-finalvcf_metrics/
+results/
 ```
 
 directory.
 
-This folder contains the **analysis-ready VCF** along with quality-control and alignment metrics generated during the WES analysis.
+The current workflow generates separate output directories for the individual pipeline processes:
 
-### Included Outputs
+```text
+results/
+├── alignment_metrics/
+├── bwa/
+├── fastqc/
+├── haplotypecaller/
+├── insert_size_metrics/
+├── markduplicates/
+├── multiqc/
+├── select_pass/
+├── select_variants/
+└── variant_filtration/
+```
 
-The `finalvcf_metrics/` directory contains:
+Each directory contains the outputs generated by its corresponding Nextflow process.
 
-- **Analysis-ready VCF**
-  - Final filtered variant calls generated by the workflow.
-  - Contains variants that passed the configured variant filtration criteria.
+### Final Demonstration Outputs
 
-- **Alignment Metrics**
-  - Metrics generated from the aligned sequencing reads.
-  - Provides information about alignment and mapping characteristics.
-
-- **Insert Size Metrics**
-  - Metrics describing the insert-size distribution of the sequencing library.
-
-These files provide example outputs that demonstrate the results produced by the pipeline.
-
-### Output Directory
+To make the important results easily accessible in the GitHub repository, selected final outputs have been copied into:
 
 ```text
 finalvcf_metrics/
-├── <analysis-ready VCF>
-├── <alignment metrics>
-└── <insert-size metrics>
 ```
 
-> **Note:** The example outputs were generated using the reduced 10,000-read test dataset. Therefore, the reported coverage, depth, alignment statistics, and variant counts should be interpreted as **workflow validation results** rather than representative results from the complete WES dataset.
+This directory contains:
 
-The full sequencing data and reference genome are not included in the repository because of their large file sizes.
+```text
+finalvcf_metrics/
+├── Analysis-ready VCF
+├── Alignment metrics
+└── Insert-size metrics
+```
 
+These files provide representative outputs from the test dataset and demonstrate the successful execution of the pipeline.
 
+### Analysis-Ready VCF
+
+The analysis-ready VCF contains the final variants that passed the configured variant filtration criteria.
+
+### Alignment Metrics
+
+The alignment metrics provide information about the performance and characteristics of the read alignment.
+
+### Insert-Size Metrics
+
+The insert-size metrics provide information about the fragment-size distribution of the sequencing library.
+
+> **Important:** These example outputs were generated using the reduced 10,000-read test dataset. Therefore, coverage, depth, alignment statistics, and variant counts should be interpreted as pipeline-validation results rather than representative results from the complete WES dataset.
+
+---
+
+## Intermediate File Management
+
+Nextflow DSL2 uses the `work/` directory to store intermediate files generated during the execution of individual processes.
+
+The `work/` directory contains process-specific intermediate files and execution data used by Nextflow for workflow execution and caching.
+
+The workflow separates process outputs into their corresponding directories under:
+
+```text
+results/
+```
+
+For example:
+
+```text
+results/fastqc/
+results/bwa/
+results/markduplicates/
+results/haplotypecaller/
+results/variant_filtration/
+```
+
+This organization makes it possible to inspect intermediate process outputs while keeping the final demonstration outputs separately organized.
+
+After successful pipeline execution and verification of the required results, the `work/` directory can be removed if the intermediate files are no longer required.
+
+The `work/` directory is not intended to be committed to GitHub.
+
+---
 
 ## Important Notes
 
-### Reduced Test Dataset
+### 1. Reduced Test Dataset
 
-This workflow was tested using a reduced dataset containing **10,000 reads per paired-end FASTQ file**.
+The workflow was tested using only **10,000 reads per paired-end FASTQ file** because the complete WES dataset required more computational resources than were available in the local WSL environment.
 
-This was done because the complete WES dataset required more computational resources than were available in the local WSL environment.
+### 2. Coverage and Depth
 
-The reduced dataset is intended for **pipeline testing and demonstration**, not for generating final biological conclusions.
+The reduced dataset results in lower sequencing depth and coverage.
 
-### Coverage and Depth
+Consequently, the final VCF may contain fewer variants than would be expected from analysis of the complete WES dataset.
 
-Because of the reduced number of reads, the resulting:
+### 3. Reference Genome
 
-- Sequencing coverage
-- Read depth
-- Variant count
-
-may be considerably lower than expected from the complete WES dataset.
-
-### Reference Genome Compatibility
-
-The reference genome, BWA indexes, FASTA index, sequence dictionary, and target BED file must be compatible with the same genome assembly.
-
-This workflow uses:
+The pipeline uses:
 
 ```text
 GRCh38 / hg38
 ```
 
-### Reference Files
+The reference genome, BWA indexes, FASTA index, sequence dictionary, and target BED file must be compatible with the same reference assembly.
 
-The reference genome and index files are intentionally not included in the GitHub repository because of their large file size.
+### 4. Reference Preparation
 
-They must be prepared separately before running the pipeline.
+Reference indexing and dictionary generation were performed separately and are not included as processes in the current workflow.
 
-### Input Data
+This avoids repeating computationally expensive reference-preparation steps during every pipeline execution.
 
-The original FASTQ data is also not included in the repository. Users should obtain the appropriate sequencing data independently and prepare the required input files.
+### 5. Large Files
+
+The following files are intentionally not included in the GitHub repository:
+
+- Raw FASTQ files
+- Full reference genome
+- Reference genome indexes
+- Nextflow `work/` directory
+- Other large intermediate files
+
+The required files must be prepared locally before running the workflow.
 
 ---
 
 ## Reproducibility
 
-This project uses **Nextflow DSL2** and a modular workflow architecture.
+This project uses **Nextflow DSL2** and a modular workflow design.
 
-The pipeline separates individual analysis steps into independent Nextflow modules, making the workflow easier to:
+The workflow separates individual analysis processes into reusable Nextflow modules:
 
-- Maintain
-- Test
-- Reuse
-- Modify
-- Reproduce
+```text
+modules/
+├── alignment_metrics.nf
+├── bwa_mem.nf
+├── fastqc.nf
+├── haplotypecaller.nf
+├── insert_size_metrics.nf
+├── markduplicates.nf
+├── select_pass.nf
+├── select_variants.nf
+└── variant_filtration.nf
+```
 
-The software versions used during development and testing are documented in this README.
+The software versions used for development and testing are documented in this README.
 
-Large sequencing files, reference genomes, generated indexes, temporary files, and analysis results are intentionally excluded from the GitHub repository.
+The combination of:
 
---
+- Nextflow workflow definitions
+- Modular process files
+- `nextflow.config`
+- Documented software versions
+- Defined reference genome
+- Defined target BED file
+- Test dataset preparation procedure
+
+provides a reproducible framework for running the WES workflow.
+
+---
+
+## Limitations
+
+This project was developed and tested in a resource-limited local WSL environment.
+
+The 10,000-read dataset was used specifically to validate the workflow while reducing computational requirements.
+
+Therefore, the current test results should not be considered representative of a complete WES analysis.
+
+For full-scale WES analysis, the complete sequencing dataset should be processed using an environment with adequate CPU, RAM, storage, and computational resources.
+
+The workflow should also be independently validated before use in research or clinical production environments.
+
+---
+
 
 ## Disclaimer
 
-This pipeline was developed for **bioinformatics workflow development, testing, and demonstration purposes**.
+This pipeline is intended for **bioinformatics workflow development, testing, and demonstration purposes**.
 
-The reduced 10,000-read dataset used for testing is not representative of a complete WES analysis. The workflow should be appropriately validated and tested with complete datasets and suitable computational resources before being used for research or clinical applications.
+The reduced test dataset and example outputs are provided to demonstrate workflow execution and should not be used as a substitute for a complete WES analysis.
