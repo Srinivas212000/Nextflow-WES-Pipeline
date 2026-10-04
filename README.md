@@ -38,6 +38,7 @@ The pipeline starts with paired-end FASTQ files and performs the following major
 - QC report aggregation using MultiQC
 - Read alignment using BWA-MEM
 - BAM processing
+- Sort and index
 - Duplicate marking
 - Alignment metrics generation
 - Insert-size metrics generation
@@ -68,7 +69,7 @@ The overall workflow is:
                      BWA-MEM
                          │
                          ▼
-                  BAM Processing
+                  BAM Processing (Sort and index )
                          │
                          ▼
                  Mark Duplicates
